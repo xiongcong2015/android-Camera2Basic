@@ -28,7 +28,9 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
+import android.graphics.Outline;
 import android.graphics.Point;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -57,6 +59,7 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.widget.Toast;
 
 import java.io.File;
@@ -383,6 +386,16 @@ public class Camera2BasicFragment extends Fragment
      */
     private static Size chooseOptimalSize(Size[] choices, int textureViewWidth,
             int textureViewHeight, int maxWidth, int maxHeight, Size aspectRatio) {
+        Log.d(TAG, "chooseOptimalSize(choices, "
+                + ", textureViewWidth: " + textureViewWidth + ", textureViewHeight: " + textureViewHeight
+                + ", maxWidth: " + maxWidth + ", maxHeight: " + maxHeight
+                + ", aspectRatio: " + aspectRatio.toString() + ")");
+
+/*
+        for (Size size : choices) {
+            Log.d(TAG, "size: " + size.toString());
+        }
+*/
 
         // Collect the supported resolutions that are at least as big as the preview Surface
         List<Size> bigEnough = new ArrayList<>();
@@ -401,6 +414,15 @@ public class Camera2BasicFragment extends Fragment
                 }
             }
         }
+
+/*
+        for (Size size : bigEnough) {
+            Log.d(TAG, "bigEnough size: " + size.toString());
+        }
+        for (Size size : notBigEnough) {
+            Log.d(TAG, "notBigEnough size: " + size.toString());
+        }
+*/
 
         // Pick the smallest of those big enough. If there is no one big enough, pick the
         // largest of those not big enough.
@@ -489,6 +511,8 @@ public class Camera2BasicFragment extends Fragment
      * @param height The height of available size for camera preview
      */
     private void setUpCameraOutputs(int width, int height) {
+        Log.d(TAG, "setUpCameraOutputs(width: " + width + ", height: " + height + ")");
+
         Activity activity = getActivity();
         CameraManager manager = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
         try {
@@ -498,7 +522,7 @@ public class Camera2BasicFragment extends Fragment
 
                 // We don't use a front facing camera in this sample.
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
-                if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) {
                     continue;
                 }
 
@@ -512,6 +536,8 @@ public class Camera2BasicFragment extends Fragment
                 Size largest = Collections.max(
                         Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
                         new CompareSizesByArea());
+                Log.d(TAG, "largest.getWidth: " + largest.getWidth());
+                Log.d(TAG, "largest.getHeight: " + largest.getHeight());
                 mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
                         ImageFormat.JPEG, /*maxImages*/2);
                 mImageReader.setOnImageAvailableListener(
@@ -568,6 +594,11 @@ public class Camera2BasicFragment extends Fragment
                 mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
                         rotatedPreviewWidth, rotatedPreviewHeight, maxPreviewWidth,
                         maxPreviewHeight, largest);
+                int mPreviewSizeWidth = mPreviewSize.getWidth();
+                int mPreviewSizeHeight = mPreviewSize.getHeight();
+                Log.d(TAG, "mPreviewSize: " + mPreviewSize);
+                Log.d(TAG, "mPreviewSize.getWidth: " + mPreviewSizeWidth);
+                Log.d(TAG, "mPreviewSize.getHeight: " + mPreviewSizeHeight);
 
                 // We fit the aspect ratio of TextureView to the size of preview we picked.
                 int orientation = getResources().getConfiguration().orientation;
@@ -600,11 +631,16 @@ public class Camera2BasicFragment extends Fragment
      * Opens the camera specified by {@link Camera2BasicFragment#mCameraId}.
      */
     private void openCamera(int width, int height) {
+        Log.d(TAG, "openCamera(width: " + width + ", height: " + height + ")");
         if (ContextCompat.checkSelfPermission(getActivity(), Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
             requestCameraPermission();
             return;
         }
+
+        mTextureView.setOutlineProvider(new ovalOutlineProvider(800));
+        mTextureView.setClipToOutline(true);
+
         setUpCameraOutputs(width, height);
         configureTransform(width, height);
         Activity activity = getActivity();
@@ -738,11 +774,14 @@ public class Camera2BasicFragment extends Fragment
      * @param viewHeight The height of `mTextureView`
      */
     private void configureTransform(int viewWidth, int viewHeight) {
+        Log.d(TAG, "configureTransform(viewWidth: " + viewWidth + ", viewHeight: " + viewHeight + ")");
+
         Activity activity = getActivity();
         if (null == mTextureView || null == mPreviewSize || null == activity) {
             return;
         }
         int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
+        Log.d(TAG, "rotation: " + rotation);
         Matrix matrix = new Matrix();
         RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
         RectF bufferRect = new RectF(0, 0, mPreviewSize.getHeight(), mPreviewSize.getWidth());
@@ -754,11 +793,13 @@ public class Camera2BasicFragment extends Fragment
             float scale = Math.max(
                     (float) viewHeight / mPreviewSize.getHeight(),
                     (float) viewWidth / mPreviewSize.getWidth());
+            Log.d(TAG, "scale: " + scale);
             matrix.postScale(scale, scale, centerX, centerY);
             matrix.postRotate(90 * (rotation - 2), centerX, centerY);
         } else if (Surface.ROTATION_180 == rotation) {
             matrix.postRotate(180, centerX, centerY);
         }
+        Log.d(TAG, "matrix: " + matrix.toString());
         mTextureView.setTransform(matrix);
     }
 
@@ -1028,6 +1069,47 @@ public class Camera2BasicFragment extends Fragment
                                 }
                             })
                     .create();
+        }
+    }
+
+    public class TextureVideoViewOutlineProvider extends ViewOutlineProvider {
+        private float mRadius;
+
+        public TextureVideoViewOutlineProvider(float radius) {
+            this.mRadius = radius;
+        }
+
+        @Override
+        public void getOutline(View view, Outline outline) {
+            Rect rect = new Rect();
+            view.getGlobalVisibleRect(rect);
+            int leftMargin = 0;
+            int topMargin = 0;
+            Rect selfRect = new Rect(leftMargin, topMargin,
+                    rect.right - rect.left - leftMargin, rect.bottom - rect.top - topMargin);
+            outline.setRoundRect(selfRect, mRadius);
+        }
+    }
+
+    private class ovalOutlineProvider extends ViewOutlineProvider {
+        private int radius;
+
+        ovalOutlineProvider(int radius) {
+            this.radius = radius;
+        }
+
+        @Override
+        public void getOutline(View view, Outline outline) {
+            Rect rect = new Rect();
+            view.getGlobalVisibleRect(rect);
+            Log.d(TAG, rect.toString());
+            int left = (rect.width() - radius) / 2;
+            int top = (rect.height() - radius) / 2;
+            int right = (rect.width() + radius) / 2;
+            int bottom = (rect.height() + radius) / 2;
+            Rect selfRect = new Rect(left, top, right, bottom);
+            Log.d(TAG, selfRect.toString());
+            outline.setOval(selfRect);
         }
     }
 
